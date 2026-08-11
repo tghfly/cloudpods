@@ -348,21 +348,17 @@ func (adapter *MegaRaidAdaptor) fillPCIInfo() error {
 		}
 		switch key {
 		case "Bus Number":
-			if len(val) == 1 {
-				val = fmt.Sprintf("0%s", val)
-			}
-			if len(val) != 2 {
+			n, err := strconv.Atoi(strings.TrimSpace(val))
+			if err != nil {
 				return errors.Errorf("Invalid bus number: %s", val)
 			}
-			adapter.busNumber = val
+			adapter.busNumber = fmt.Sprintf("%02x", n)
 		case "Device Number":
-			if len(val) == 1 {
-				val = fmt.Sprintf("0%s", val)
-			}
-			if len(val) != 2 {
+			n, err := strconv.Atoi(strings.TrimSpace(val))
+			if err != nil {
 				return errors.Errorf("Invalid device number: %s", val)
 			}
-			adapter.deviceNumber = val
+			adapter.deviceNumber = fmt.Sprintf("%02x", n)
 		case "Function Number":
 			if len(val) != 1 {
 				return errors.Errorf("Invalid function number: %s", val)

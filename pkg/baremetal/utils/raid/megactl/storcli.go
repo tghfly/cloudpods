@@ -102,10 +102,24 @@ func parseLineForStorcli(a *StorcliAdaptor, l string) {
 	case productNameKey:
 		a.name = val
 	case busNumber:
-		a.busNumber = fmt.Sprintf("0%s", val)
+		// storcli reports Bus Number in DECIMAL; sysfs BDF is hex.
+		// e.g. storcli "23" -> sysfs 0000:17:00.0 (0x17 == 23). See megaraid-storcli-pci-bug.
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			a.busNumber = val
+		} else {
+			a.busNumber = fmt.Sprintf("%02x", n)
+		}
 	case devNumber:
-		a.deviceNumber = fmt.Sprintf("0%s", val)
+		// Device Number likewise decimal -> hex (same as Bus Number).
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			a.deviceNumber = val
+		} else {
+			a.deviceNumber = fmt.Sprintf("%02x", n)
+		}
 	case funcNumber:
+		// PCI function number is always 0-7, single digit, dec == hex.
 		a.funcNumber = val
 	}
 }
