@@ -625,6 +625,9 @@ func (b *SBaremetalInstance) Keyword() string {
 }
 
 func (b *SBaremetalInstance) GetId() string {
+	if b.desc == nil {
+		return ""
+	}
 	id, err := b.desc.GetString("id")
 	if err != nil {
 		log.Errorf("Get id from desc %s error: %v", b.desc.String(), err)
@@ -633,9 +636,14 @@ func (b *SBaremetalInstance) GetId() string {
 }
 
 func (b *SBaremetalInstance) GetName() string {
+	if b.desc == nil {
+		return ""
+	}
 	id, err := b.desc.GetString("name")
 	if err != nil {
-		log.Fatalf("Get name from desc %s error: %v", b.desc.String(), err)
+		// 曾是 log.Fatalf，会让整个 agent 进程退出；删除/拆除窗口下 desc 可能缺 key，
+		// 改为 Errorf 与 SBaremetalServer.GetName（manager.go:2618）保持一致，不崩进程。
+		log.Errorf("Get name from desc %s error: %v", b.desc.String(), err)
 	}
 	return id
 }
@@ -2458,6 +2466,11 @@ func (b *SBaremetalInstance) clearLogs(ctx context.Context, logType string) erro
 }
 
 func (b *SBaremetalInstance) doCronJobs(ctx context.Context) {
+	// 删除流程里 remove() 会把 desc 置 nil；DoCronJobs 用 sync.Map.Range 做快照，
+	// 可能持有正在被拆除的实例指针。desc 为空说明实例已下线，跳过避免 nil 解引用。
+	if b.desc == nil {
+		return
+	}
 	for _, job := range b.cronJobs {
 		now := time.Now().UTC()
 		if job.NeedsToRun(now) {
