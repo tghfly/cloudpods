@@ -243,6 +243,38 @@ func (manager *SGuestManager) FetchCustomizeColumns(
 	}
 	if len(fields) == 0 || fields.Contains("isolated_devices") || fields.Contains("is_gpu") {
 		gdevs := fetchGuestIsolatedDevices(guestIds)
+		// For baremetal guests, fetch GPU directly from host's isolated_devices_tbl
+		bmHostIds := make([]string, 0)
+		bmGuestHostMap := make(map[string]string) // hostId -> guestId
+		for i := range guests {
+			if guests[i].Hypervisor == api.HYPERVISOR_BAREMETAL && guests[i].HostId != "" {
+				if _, ok := gdevs[guestIds[i]]; !ok {
+					bmHostIds = append(bmHostIds, guests[i].HostId)
+					bmGuestHostMap[guests[i].HostId] = guestIds[i]
+				}
+			}
+		}
+		if len(bmHostIds) > 0 {
+			hostDevs := IsolatedDeviceManager.FindByHosts(bmHostIds)
+			for j := range hostDevs {
+				guestId, ok := bmGuestHostMap[hostDevs[j].HostId]
+				if !ok {
+					continue
+				}
+				dev := api.SIsolatedDevice{}
+				dev.Id = hostDevs[j].Id
+				dev.HostId = hostDevs[j].HostId
+				dev.DevType = hostDevs[j].DevType
+				dev.Model = hostDevs[j].Model
+				dev.Addr = hostDevs[j].Addr
+				dev.VendorDeviceId = hostDevs[j].VendorDeviceId
+				dev.NumaNode = byte(hostDevs[j].NumaNode)
+				if gdevs == nil {
+					gdevs = make(map[string][]api.SIsolatedDevice)
+				}
+				gdevs[guestId] = append(gdevs[guestId], dev)
+			}
+		}
 		if gdevs != nil {
 			for i := range rows {
 				if gdev, ok := gdevs[guestIds[i]]; ok {
