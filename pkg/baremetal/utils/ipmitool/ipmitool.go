@@ -99,8 +99,8 @@ type LanPlusIPMI struct {
 	user           string
 	password       string
 	port           int
-	cipherSuite    int  // 0 = no -C; >0 = pass -C N
-	cipherResolved bool // true after Ensure/Detect or constructed with known suite > 0
+	cipherSuite    int  // -1 = unresolved, need detect; 0 = no -C (ipmitool default); >0 = pass -C N
+	cipherResolved bool // true after Ensure/Detect or constructed with known suite >= 0
 }
 
 func NewLanPlusIPMI(host, user, password string) (*LanPlusIPMI, error) {
@@ -108,7 +108,7 @@ func NewLanPlusIPMI(host, user, password string) (*LanPlusIPMI, error) {
 }
 
 func NewLanPlusIPMIWithPort(host, user, password string, port int) (*LanPlusIPMI, error) {
-	return NewLanPlusIPMIWithCipher(host, user, password, port, 0)
+	return NewLanPlusIPMIWithCipher(host, user, password, port, -1)
 }
 
 func NewLanPlusIPMIWithCipher(host, user, password string, port, cipherSuite int) (*LanPlusIPMI, error) {
@@ -119,8 +119,9 @@ func NewLanPlusIPMIWithCipher(host, user, password string, port, cipherSuite int
 		port:        port,
 		cipherSuite: cipherSuite,
 	}
-	// Known non-default suite from persisted config: skip re-detect.
-	if cipherSuite > 0 {
+	// cipherSuite >= 0 means a previously persisted/known value: skip re-detect.
+	// Use -1 (or call NewLanPlusIPMI/NewLanPlusIPMIWithPort) to trigger detection.
+	if cipherSuite >= 0 {
 		ipmi.cipherResolved = true
 		return ipmi, nil
 	}

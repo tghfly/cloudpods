@@ -61,7 +61,7 @@ type SBaseRedfishClient struct {
 
 func NewBaseRedfishClient(endpoint string, username, password string, debug bool) SBaseRedfishClient {
 	client := httputils.GetDefaultClient()
-	client.Timeout = 60 * time.Second
+	client.Timeout = 15 * time.Second
 	cli := SBaseRedfishClient{
 		client:   client,
 		endpoint: endpoint,
@@ -717,6 +717,9 @@ func (r *SBaseRedfishClient) GetPower(ctx context.Context) ([]SPower, error) {
 	var err error
 	if len(path) > 0 {
 		resp, err = r.Get(ctx, path)
+		if err != nil {
+			return nil, errors.Wrap(err, "Get power")
+		}
 	} else {
 		_, resp, err = r.GetResource(ctx, "Chassis", "0", "Power")
 		if err != nil {
@@ -737,6 +740,9 @@ func (r *SBaseRedfishClient) GetThermal(ctx context.Context) ([]STemperature, er
 	var err error
 	if len(path) > 0 {
 		resp, err = r.Get(ctx, path)
+		if err != nil {
+			return nil, errors.Wrap(err, "Get thermal")
+		}
 	} else {
 		_, resp, err = r.GetResource(ctx, "Chassis", "0", "Thermal")
 		if err != nil {

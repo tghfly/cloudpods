@@ -1834,7 +1834,13 @@ func (b *SBaremetalInstance) GetIPMITool() *ipmitool.LanPlusIPMI {
 		log.Debugf("GetIPMIConfig is nil")
 		return nil
 	}
-	tool, err := ipmitool.NewLanPlusIPMIWithCipher(conf.IpAddr, conf.Username, conf.Password, 623, conf.CipherSuite)
+	cipher := conf.CipherSuite
+	if !conf.Verified {
+		// IPMI not probed yet: force cipher-suite detection instead of
+		// trusting the zero value (0) as a known-good suite.
+		cipher = -1
+	}
+	tool, err := ipmitool.NewLanPlusIPMIWithCipher(conf.IpAddr, conf.Username, conf.Password, 623, cipher)
 	if err != nil {
 		log.Errorf("NewLanPlusIPMIWithCipher for %s: %v", conf.IpAddr, err)
 		return nil
