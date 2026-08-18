@@ -74,6 +74,52 @@ func storcliEnableJBOD(
 	return true
 }
 
+// [AI:START] tool=claude author=tangguanghui@tydic.com
+// storcliGetPDStates 通过 storcli 的 JSON 输出查询所有物理盘的当前状态,
+// 返回 map 的 key 为 "EID:Slt"(如 "32:0"),value 为状态字符串
+func storcliGetPDStates(
+	getCmd func(args ...string) (string, error),
+	term raid.IExecTerm,
+) (map[string]string, error) {
+	cmd, err := getCmd("eall/sall", "show", "J")
+	if err != nil {
+		return nil, errors.Wrap(err, "get storcli PD list cmd")
+	}
+	lines, err := term.Run(cmd)
+	if err != nil {
+		return nil, errors.Wrap(err, "run storcli eall/sall show J")
+	}
+	info, err := parseStorcliControllers(strings.Join(lines, "\n"))
+	if err != nil {
+		return nil, errors.Wrap(err, "parseStorcliControllers")
+	}
+	states := make(map[string]string)
+	for _, c := range info.Controllers {
+		for _, pd := range c.ResponseData.Info {
+			states[pd.EnclosureIdSlotNo] = pd.State
+		}
+	}
+	return states, nil
+}
+
+// [AI:END]
+
+// [AI:START] tool=claude author=tangguanghui@tydic.com
+// isStorcliPDJBOD 判断盘状态是否为 JBOD,
+// 使用包含匹配以兼容 "JBOD, Spun Down" 等变体
+func isStorcliPDJBOD(state string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(state)), "jbod")
+}
+
+// [AI:END]
+
+// [AI:START] tool=claude author=tangguanghui@tydic.com
+// storcliBuildJBOD 将未配置的盘转为 JBOD 直通模式。
+// 已处于 JBOD 态的盘直接跳过:固件对这类盘执行 "set jbod" 会报
+// "Operation not allowed"(如盘状态转换配额耗尽时),
+// 且 JBOD -> UGood -> JBOD 的往返转换只会白白消耗固件配额。
+// 这里只关心最终状态,因此 "set jbod" 失败后若复查确认盘已是
+// JBOD 态,同样视为成功
 func storcliBuildJBOD(
 	getCmd func(args ...string) (string, error),
 	term raid.IExecTerm,
@@ -86,23 +132,46 @@ func storcliBuildJBOD(
 	if !storcliIsJBODEnabled(getCmd, term) {
 		return fmt.Errorf("JBOD not supported")
 	}
-	cmds := []string{}
+	// devIsJBOD 用 "enclosure:slot" 作为 key 在盘状态 map 中查询指定盘是否已 JBOD
+	devIsJBOD := func(d *baremetal.BaremetalStorage, states map[string]string) bool {
+		if states == nil {
+			return false
+		}
+		state, ok := states[GetSpecString(d)]
+		return ok && isStorcliPDJBOD(state)
+	}
+	states, err := storcliGetPDStates(getCmd, term)
+	if err != nil {
+		// 状态查询是尽力而为,失败时回退为直接下发 set jbod
+		log.Warningf("storcliBuildJBOD: get PD states: %v", err)
+		states = nil
+	}
+	errs := make([]error, 0)
 	for _, d := range devs {
-		// cmd := GetCommand2(fmt.Sprintf("/c%d/e%d/s%d", adapter.storcliIndex, d.Enclosure, d.Slot))
+		if devIsJBOD(d, states) {
+			log.Infof("storcliBuildJBOD: dev %s already JBOD, skip", GetSpecString(d))
+			continue
+		}
 		cmd, err := getCmd()
 		if err != nil {
 			return errors.Wrapf(err, "getCmd for dev %#v", d)
 		}
-		cmd = fmt.Sprintf("%s/e%d/s%d", cmd, d.Enclosure, d.Slot)
-		cmds = append(cmds, cmd)
+		cmd = fmt.Sprintf("%s/e%d/s%d set jbod", cmd, d.Enclosure, d.Slot)
+		if _, err := term.Run(cmd); err != nil {
+			// 盘已是 JBOD 态时固件会拒绝 "set jbod" 并报
+			// "Operation not allowed"(如盘状态转换计数器耗尽),
+			// 失败后先复查盘状态,确认已 JBOD 则不算错误
+			if newStates, err2 := storcliGetPDStates(getCmd, term); err2 == nil && devIsJBOD(d, newStates) {
+				log.Infof("storcliBuildJBOD: dev %s already JBOD after set jbod fail", GetSpecString(d))
+				continue
+			}
+			errs = append(errs, errors.Wrapf(err, "set jbod cmd %s", cmd))
+		}
 	}
-	log.Infof("storcliBuildJBOD cmds: %v", cmds)
-	_, err := term.Run(cmds...)
-	if err != nil {
-		return err
-	}
-	return nil
+	return errors.NewAggregate(errs)
 }
+
+// [AI:END]
 
 func storcliBuildNoRaid(
 	getCmd func(args ...string) (string, error),

@@ -187,9 +187,14 @@ func (dev *MegaRaidPhyDev) convertModel(val string) string {
 	return strings.Join(regexp.MustCompile(`\s+`).Split(val, -1), " ")
 }
 
+// [AI:START] tool=claude author=tangguanghui@tydic.com
+// convertState 将固件上报的盘状态字符串归一化为统一的状态标识,
+// 同时兼容 MegaCli 长格式(如 "Unconfigured(good), Spun Up")
+// 和 storcli 缩写格式(如 "UGood"/"Onln"/"JBOD")
 func (dev *MegaRaidPhyDev) convertState(val string) string {
 	state := val
-	if val == "JBOD" {
+	// 使用包含匹配,兼容 "JBOD, Spun Down" 等带后缀的变体
+	if strings.Contains(strings.ToLower(val), "jbod") {
 		state = "jbod"
 	} else if strings.Contains(strings.ToLower(val), "online") || utils.IsInStringArray(val, []string{"Onln"}) {
 		state = "online"
@@ -199,13 +204,17 @@ func (dev *MegaRaidPhyDev) convertState(val string) string {
 		state = "hotspare"
 	} else if strings.Contains(strings.ToLower(val), "copyback") {
 		state = "copyback"
-	} else if strings.Contains(strings.ToLower(val), "unconfigured(good)") {
+	} else if strings.Contains(strings.ToLower(val), "unconfigured(good)") || utils.IsInStringArray(val, []string{"UGood"}) {
+		// "UGood" 是 storcli 对 "Unconfigured(good)" 的缩写,
+		// 不识别会导致 storcli 路径上报的好盘被误判为 offline
 		state = "unconfigured_good"
 	} else {
 		state = "offline"
 	}
 	return state
 }
+
+// [AI:END]
 
 func (dev *MegaRaidPhyDev) isComplete() bool {
 	if !dev.RaidBasePhyDev.IsComplete() {
@@ -576,6 +585,22 @@ func getLogicVolumeDeviceById(hostNum, scsiId int, term raid.IExecTerm) (string,
 }
 
 func (adapter *MegaRaidAdaptor) PreBuildRaid(confs []*api.BaremetalDiskConfig) error {
+	// [AI:START] tool=claude author=tangguanghui@tydic.com
+	// 当所有磁盘布局均为裸盘(conf "none")时,盘最终应处于/保持 JBOD 态,
+	// 部署前先把 JBOD 盘转成 UGood 只会白白消耗固件的盘状态转换配额
+	// ("Maximum allowed drive conversion has been reached"),
+	// 因此整体跳过部署前的 JBOD 清理
+	allNoRaid := len(confs) > 0
+	for _, conf := range confs {
+		if conf.Conf != "none" {
+			allNoRaid = false
+			break
+		}
+	}
+	if allNoRaid {
+		return nil
+	}
+	// [AI:END]
 	adapter.clearJBODDisks()
 	return nil
 }

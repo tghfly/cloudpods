@@ -32,7 +32,12 @@ import (
 
 var (
 	PxeLinuxCfgPattern = `^pxelinux.cfg/01-(?P<mac>([0-9a-f]{2}-){5}[0-9a-f]{2})$`
-	GrubCfgPattern     = `grub/grub.cfg-01-(?P<mac>([0-9a-f]{2}-){5}[0-9a-f]{2})$`
+	// [AI:START] tool=claude author=tangguanghui@tydic.com
+	// grub/ 前缀设为可选:部分固件会直接从 TFTP 根目录请求
+	// "grub.cfg-01-<mac>" 而非 "grub/grub.cfg-01-<mac>",
+	// 两种形式的请求都需要匹配
+	GrubCfgPattern = `(?:grub/)?grub.cfg-01-(?P<mac>([0-9a-f]{2}-){5}[0-9a-f]{2})$`
+	// [AI:END]
 )
 
 type TFTPHandler struct {
