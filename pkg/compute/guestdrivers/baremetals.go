@@ -28,6 +28,7 @@ import (
 	"yunion.io/x/pkg/util/rbacscope"
 	"yunion.io/x/pkg/utils"
 
+	"yunion.io/x/onecloud/pkg/apis"
 	api "yunion.io/x/onecloud/pkg/apis/compute"
 	"yunion.io/x/onecloud/pkg/cloudcommon/db"
 	"yunion.io/x/onecloud/pkg/cloudcommon/db/quotas"
@@ -457,8 +458,51 @@ func (self *SBaremetalGuestDriver) ValidateCreateDataOnHost(ctx context.Context,
 	if host.GetBaremetalServer() != nil {
 		return nil, httperrors.NewInsufficientResourceError("Baremetal %s is occupied", bmName)
 	}
+	if len(host.CpuArchitecture) > 0 {
+		archMatch := true
+		if host.IsArmHost() {
+			archMatch = apis.IsARM(input.OsArch)
+		} else if host.IsRISCVHost() {
+			archMatch = apis.IsRISCV(input.OsArch)
+		} else if apis.IsARM(input.OsArch) || apis.IsRISCV(input.OsArch) {
+			archMatch = false
+		}
+		if !archMatch {
+			return nil, httperrors.NewInputParameterError("image architecture %s does not match baremetal %s architecture %s", input.OsArch, bmName, host.CpuArchitecture)
+		}
+	}
 	input.VmemSize = host.MemSize
 	input.VcpuCount = int(host.CpuCount)
+	return input, nil
+}
+
+func (self *SBaremetalGuestDriver) ValidateRebuildRoot(ctx context.Context, userCred mcclient.TokenCredential, guest *models.SGuest, input *api.ServerRebuildRootInput) (*api.ServerRebuildRootInput, error) {
+	if len(input.ImageId) == 0 {
+		return input, nil
+	}
+	host, err := guest.GetHost()
+	if err != nil {
+		return input, nil
+	}
+	if len(host.CpuArchitecture) == 0 {
+		return input, nil
+	}
+	image, err := models.CachedimageManager.GetImageById(ctx, userCred, input.ImageId, false)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get image %s", input.ImageId)
+	}
+	imageArch := image.Properties["os_arch"]
+	archMatch := true
+	if host.IsArmHost() {
+		archMatch = apis.IsARM(imageArch)
+	} else if host.IsRISCVHost() {
+		archMatch = apis.IsRISCV(imageArch)
+	} else if apis.IsARM(imageArch) || apis.IsRISCV(imageArch) {
+		archMatch = false
+	}
+	if !archMatch {
+		return nil, httperrors.NewInputParameterError("image %s architecture %s does not match baremetal %s architecture %s", image.Name, imageArch, guest.Name, host.CpuArchitecture)
+	}
 	return input, nil
 }
 

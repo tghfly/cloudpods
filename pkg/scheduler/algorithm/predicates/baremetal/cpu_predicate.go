@@ -17,6 +17,7 @@ package baremetal
 import (
 	"context"
 
+	"yunion.io/x/onecloud/pkg/apis"
 	"yunion.io/x/onecloud/pkg/scheduler/algorithm/predicates"
 	"yunion.io/x/onecloud/pkg/scheduler/core"
 )
@@ -39,6 +40,29 @@ func (p *CPUPredicate) Execute(ctx context.Context, u *core.Unit, c core.Candida
 
 	useRsvd := h.UseReserved()
 	getter := c.Getter()
+
+	// empty OsArch means x86_64, same semantics as the guest cpu predicate
+	archMatch := true
+	isArmHost := getter.IsArmHost()
+	isRiscvHost := getter.IsRISCVHost()
+	if apis.IsARM(d.OsArch) {
+		if !isArmHost {
+			archMatch = false
+		}
+	} else if apis.IsRISCV(d.OsArch) {
+		if !isRiscvHost {
+			archMatch = false
+		}
+	} else {
+		if isArmHost || isRiscvHost {
+			archMatch = false
+		}
+	}
+	if !archMatch {
+		h.Exclude2(predicates.ErrHostCpuArchitectureNotMatch, getter.CPUArch(), d.OsArch)
+		return h.GetResult()
+	}
+
 	freeCPUCount := getter.FreeCPUCount(useRsvd)
 	reqCPUCount := int64(d.Ncpu)
 	if freeCPUCount < reqCPUCount {
