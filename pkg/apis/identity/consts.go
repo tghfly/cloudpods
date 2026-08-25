@@ -39,6 +39,7 @@ const (
 	AUTH_METHOD_OAuth2   = "oauth2"
 	AUTH_METHOD_VERIFY   = "verify"
 	AUTH_METHOD_ASSUME   = "assume"
+	AUTH_METHOD_TYC      = "tyc" // Tydic 智慧门户 token 直连：body.idp_id + body.token → cloudpods token
 
 	// AUTH_METHOD_ID_PASSWORD = 1
 	// AUTH_METHOD_ID_TOKEN    = 2
@@ -72,6 +73,9 @@ const (
 	IdentityDriverSAML   = "saml"
 	IdentityDriverOIDC   = "oidc"   // OpenID Connect
 	IdentityDriverOAuth2 = "oauth2" // OAuth2.0
+	IdentityDriverTyc    = "tyc"    // Tydic 智慧门户（v2：同步+双管道数据权限）
+
+	IdpTemplateTyc = "tyc_default"
 
 	IdentityDriverStatusConnected    = "connected"
 	IdentityDriverStatusDisconnected = "disconnected"
@@ -92,7 +96,7 @@ const (
 )
 
 var (
-	AUTH_METHODS = []string{AUTH_METHOD_PASSWORD, AUTH_METHOD_TOKEN, AUTH_METHOD_AKSK, AUTH_METHOD_CAS}
+	AUTH_METHODS = []string{AUTH_METHOD_PASSWORD, AUTH_METHOD_TOKEN, AUTH_METHOD_AKSK, AUTH_METHOD_CAS, AUTH_METHOD_TYC}
 
 	PASSWORD_PROTECTED_IDPS = []string{
 		IdentityDriverSQL,
@@ -103,9 +107,23 @@ var (
 		"ldap": {
 			"password",
 		},
+		IdentityDriverTyc: {
+			"userinfo_secret",
+			"callback_secret",
+			"rsa_private_key_pem",
+		},
 	}
 
 	CommonWhitelistOptionMap = map[string][]string{
+		IdentityDriverTyc: {
+			"base_url",
+			"app_key",
+			"dst_sys_id",
+			"app_id",
+			"tenant_id",
+			"enable_rsa",
+			"request_timeout_seconds",
+		},
 		"default": {
 			"enable_quota_check",
 			"default_quota_value",

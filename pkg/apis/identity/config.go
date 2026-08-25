@@ -84,6 +84,23 @@ type SLDAPIdpConfigOptions struct {
 	GroupQueryScope      string `json:"group_query_scope,omitempty" help:"Query scope" choices:"one|sub"`
 }
 
+// STycIdpConfigOptions tydic 智慧门户驱动配置（v2：同步解耦 + 双管道数据权限）。
+// 敏感字段（userinfo_secret/callback_secret/rsa_private_key_pem）走 sensitive_config，
+// 其余非敏感字段走 whitelisted_config / options / 环境变量（双轨制）。
+type STycIdpConfigOptions struct {
+	BaseUrl                string `json:"base_url" help:"tydic 智慧门户 base URL，例如 https://tydc.example.com" required:"true"`
+	AppKey                 string `json:"app_key" help:"tydic 集团主数据 appKey（TcpCont.appKey）" required:"true"`
+	DstSysId               string `json:"dst_sys_id" help:"tydic dstSysId（目标系统编码）" required:"true"`
+	AppId                  string `json:"app_id,omitempty" help:"tydic 归属系统编码（705…权限接口 svcCont.appId 必传；其他接口可留空）"`
+	TenantId               string `json:"tenant_id,omitempty" help:"默认租户 ID，用于 qryOrganizationList / qryProjectList 过滤"`
+	EnableRSA              bool   `json:"enable_rsa,allowfalse" help:"是否启用 RSA 二次签名；false=仅 MD5，按现场开关调整"`
+	RSAPrivateKeyPEM       string `json:"rsa_private_key_pem,omitempty" help:"RSA 私钥 PEM（启用 RSA 时必填）" token:"rsa_private_key_pem"`
+	RequestTimeoutSeconds  int    `json:"request_timeout_seconds,allowzero" default:"15" help:"tydic HTTP 请求超时（秒）"`
+	UserInfoSecret         string `json:"userinfo_secret,omitempty" help:"MD5 签名 SecretKey：/sso/getUserInfoByToken、doService 列表接口（默认 AD67EA2F3BE6E5AD）" token:"userinfo_secret"`
+	CallbackSecret         string `json:"callback_secret,omitempty" help:"MD5 签名 SecretKey：/sso/sync 退出回调（默认 RT4QRDK3FW2CE61）" token:"callback_secret"`
+	ScopeSnapshotTTLSeconds int   `json:"scope_snapshot_ttl_seconds,allowzero" default:"60" help:"TycScope 快照 TTL（秒）；webhook 模式下可写 0 强制立即刷新"`
+}
+
 const (
 	IdpTemplateMSSingleDomain       = "msad_one_domain"
 	IdpTemplateMSMultiDomain        = "msad_multi_domain"
@@ -103,6 +120,8 @@ const (
 	IdpTemplateFeishu   = "feishu_oauth2"
 	IdpTemplateQywechat = "qywechat_oauth2"
 	IdpTemplateBingoIAM = "bingoiam_oauth2"
+
+	IdpTemplateTyc_Driver = IdpTemplateTyc // consts.go 已声明 IdpTemplateTyc="tyc_default"
 )
 
 var (
@@ -125,6 +144,8 @@ var (
 		IdpTemplateWechat:   IdentityDriverOAuth2,
 		IdpTemplateQywechat: IdentityDriverOAuth2,
 		IdpTemplateBingoIAM: IdentityDriverOAuth2,
+
+		IdpTemplateTyc: IdentityDriverTyc,
 	}
 )
 

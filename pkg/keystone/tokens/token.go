@@ -27,6 +27,7 @@ import (
 
 	api "yunion.io/x/onecloud/pkg/apis/identity"
 	"yunion.io/x/onecloud/pkg/keystone/cache"
+	"yunion.io/x/onecloud/pkg/keystone/driver/tyc"
 	"yunion.io/x/onecloud/pkg/keystone/keys"
 	"yunion.io/x/onecloud/pkg/keystone/models"
 	"yunion.io/x/onecloud/pkg/keystone/options"
@@ -305,7 +306,7 @@ func (t *SAuthToken) GetSimpleUserCred(token string) (mcclient.TokenCredential, 
 		ret.Project = proj.Name
 		ret.ProjectDomainId = proj.DomainId
 		ret.ProjectDomain = proj.GetDomain().Name
-		roles, err = models.AssignmentManager.FetchUserProjectRoles(t.UserId, t.ProjectId)
+		roles, err = fetchUserProjectRolesWithTycScope(t.UserId, t.ProjectId)
 	} else if len(t.DomainId) > 0 {
 		domain, err := models.DomainManager.FetchDomainById(t.DomainId)
 		if err != nil {
@@ -313,7 +314,7 @@ func (t *SAuthToken) GetSimpleUserCred(token string) (mcclient.TokenCredential, 
 		}
 		ret.ProjectDomainId = t.DomainId
 		ret.ProjectDomain = domain.Name
-		roles, err = models.AssignmentManager.FetchUserProjectRoles(t.UserId, t.DomainId)
+		roles, err = fetchUserProjectRolesWithTycScope(t.UserId, t.DomainId)
 	}
 	roleStrs := make([]string, len(roles))
 	roleIdStrs := make([]string, len(roles))
@@ -334,7 +335,7 @@ func (t *SAuthToken) getRoles() ([]models.SRole, error) {
 		roleProjectId = t.DomainId
 	}
 	if len(roleProjectId) > 0 {
-		return models.AssignmentManager.FetchUserProjectRoles(t.UserId, roleProjectId)
+		return fetchUserProjectRolesWithTycScope(t.UserId, roleProjectId)
 	}
 	return nil, nil
 }
@@ -538,4 +539,37 @@ func (t *SAuthToken) getTokenV2(
 	}
 
 	return &token, nil
+}
+
+// fetchUserProjectRolesWithTycScope 增强版角色获取：对 TYC 用户合并虚拟 assignments。
+// 非 TYC 用户（Extra 无 tyc_scope）直接走原生路径，零影响。
+func fetchUserProjectRolesWithTycScope(userId, projectId string) ([]models.SRole, error) {
+	realFn := func(uid, pid string) ([]models.SRole, error) {
+		return models.AssignmentManager.FetchUserProjectRoles(uid, pid)
+	}
+	real, err := realFn(userId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	// 尝试从 SUser.Extra 加载 TycScope
+	usr, e2 := models.UserManager.FetchById(userId)
+	if e2 != nil {
+		return real, nil
+	}
+	suser, ok := usr.(*models.SUser)
+	if !ok || suser == nil || suser.Extra == nil {
+		return real, nil
+	}
+	scopeJSON, e3 := suser.Extra.GetString("tyc_scope")
+	if e3 != nil || len(scopeJSON) == 0 {
+		return real, nil
+	}
+	// 调用 tyc 包的 wrapper
+	return tyc.FetchUserProjectRolesWithIdpScope(
+		context.Background(),
+		userId, projectId,
+		realFn,
+		scopeJSON,
+		5,
+	)
 }

@@ -81,6 +81,18 @@ type SKeystoneOptions struct {
 	MaxGroupRolesInProject int `help:"maximal allowed roles of a group in a project" default:"3"`
 
 	ForceEnableMfa string `help:"force enable mfa" default:"disable" choices:"all|after|disable"`
+
+	// ── Tydic 智慧门户 (v2: 同步解耦 + 双管道数据权限) 全局开关 ─────────
+	// 这些是 keystone 全局选项；单个 IdP 的配置（URL、密钥、appKey…）仍然
+	// 通过 identity_provider 配置表（whitelisted_config / sensitive_config 双轨）承载。
+	TycBaseUrl                string `help:"[tyc] 全局默认 tydic base URL（单个 IdP 未配时回退）" default:""`
+	TycAppKey                 string `help:"[tyc] 全局默认 appKey（单个 IdP 未配时回退）" default:""`
+	TycDstSysId               string `help:"[tyc] 全局默认 dstSysId（单个 IdP 未配时回退）" default:""`
+	TycAppId                  string `help:"[tyc] 全局默认 appId 归属系统编码（705…权限接口用）" default:""`
+	TycTenantId               string `help:"[tyc] 全局默认 tenantId（qryOrganizationList / qryProjectList 过滤用）" default:""`
+	TycEnableRSA              bool   `help:"[tyc] 全局默认是否启用 RSA 二次签名；false=仅 MD5" json:",allowfalse" default:"false"`
+	TycRequestTimeoutSeconds  int    `help:"[tyc] tydic HTTP 请求超时（秒）" default:"15"`
+	TycScopeSnapshotTTLSeconds int   `help:"[tyc] TycScope 快照 TTL（秒）；webhook 模式可写 0 强制立即刷新" default:"60"`
 }
 
 var (

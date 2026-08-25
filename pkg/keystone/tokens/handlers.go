@@ -45,6 +45,15 @@ func AddHandler(app *appsrv.Application) {
 
 	app.AddHandler2("DELETE", "/v3/auth/tokens", authenticateToken(invalidateTokenV3), nil, "delete_tokens_v3", nil)
 	app.AddHandler2("GET", "/v3/auth/tokens/invalid", authenticateToken(fetchInvalidTokensV3), nil, "fetch_revoked_tokens_v3", nil)
+
+	// Tydic 智慧门户 token 直连接口：统一门户带 token 进来，换取 cloudpods unscoped/scoped token。
+	// 与 /v3/auth/tokens methods=["password","token"] 等等价，简化前端不用构造完整 identity 结构。
+	//
+	// Body（JSON）：
+	//   idp_id  string  可选（SingletonInstance=true 默认一份；多份 tyc idp 必传）
+	//   token   string  必填，tydic 门户签发的 SSO token
+	//   scope   object  可选，{project:{id,name,domain:{id,name}}} 或 {domain:{id,name}}
+	app.AddHandler2("POST", "/v3/auth/tyc/login", authenticateTydicTokensV3, nil, "auth_tyc_login_v3", nil)
 }
 
 func FetchAuthContext(authCtx mcclient.SAuthContext, r *http.Request) mcclient.SAuthContext {
@@ -120,6 +129,69 @@ func authenticateTokensV3(ctx context.Context, w http.ResponseWriter, r *http.Re
 
 	appsrv.SendJSON(w, jsonutils.Marshal(token))
 
+	models.UserManager.TraceLoginV3(ctx, token)
+}
+
+// authenticateTydicTokensV3 tydic 统一门户直连：简化 body（{idp_id, token, scope}）→ cloudpods token。
+//
+// 等价于先把 body 包装成 SAuthenticationInputV3{methods=["tyc"]} 再调 /v3/auth/tokens 的标准流程。
+func authenticateTydicTokensV3(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	_, _, body := appsrv.FetchEnv(ctx, w, r)
+	if body == nil {
+		httperrors.InvalidInputError(ctx, w, "fail to decode request body")
+		return
+	}
+	// 1) 解析简化 body：Scope 结构与 SAuthenticationInputV3.Auth.Scope 完全一致，因此直接复⽤ input.Auth.Scope 作为接收。
+	var idpId, tok string
+	if idpIdI, _ := body.GetString("idp_id"); len(idpIdI) > 0 {
+		idpId = idpIdI
+	}
+	if tokI, e2 := body.GetString("token"); e2 != nil || len(tokI) == 0 {
+		httperrors.InvalidInputError(ctx, w, "missing token in tyc login body")
+		return
+	} else {
+		tok = tokI
+	}
+
+	// 2) 包装成标准 SAuthenticationInputV3（methods=["tyc"]，Password.User.Password 承载 tydic token）
+	input := mcclient.SAuthenticationInputV3{}
+	input.Auth.Identity.Methods = []string{api.AUTH_METHOD_TYC}
+	input.Auth.Identity.Id = idpId
+	input.Auth.Identity.Password.User.Password = tok
+	// scope：从 body 取 "scope" 子 JSON 解到 input.Auth.Scope（匿名 struct 由 json.Unmarshal 按字段匹配）
+	if scopeJSON, _ := body.Get("scope"); scopeJSON != nil {
+		if e := scopeJSON.Unmarshal(&input.Auth.Scope); e != nil {
+			httperrors.InvalidInputError(ctx, w, "parse scope: %v", e)
+			return
+		}
+	}
+	input.Auth.Context = FetchAuthContext(input.Auth.Context, r)
+
+	// 3) 复用 AuthenticateV3
+	token, err := AuthenticateV3(ctx, input)
+	if err != nil {
+		log.Errorf("AuthenticateV3 (TYC) error: %s", err)
+		switch errors.Cause(err) {
+		case sqlchemy.ErrDuplicateEntry:
+			httperrors.ConflictError(ctx, w, "duplicate username")
+		case httperrors.ErrTooManyAttempts,
+			httperrors.ErrUserNotFound,
+			httperrors.ErrUserDisabled,
+			httperrors.ErrUserLocked,
+			httperrors.ErrInvalidIdpStatus,
+			httperrors.ErrWrongPassword:
+			httperrors.GeneralServerError(ctx, w, err)
+		default:
+			httperrors.UnauthorizedError(ctx, w, "unauthorized %s", err)
+		}
+		return
+	}
+	if token == nil {
+		httperrors.UnauthorizedError(ctx, w, "user not found or not enabled")
+		return
+	}
+	w.Header().Set(api.AUTH_SUBJECT_TOKEN_HEADER, token.Id)
+	appsrv.SendJSON(w, jsonutils.Marshal(token))
 	models.UserManager.TraceLoginV3(ctx, token)
 }
 

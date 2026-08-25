@@ -324,6 +324,11 @@ func listItemQueryFiltersRaw(
 		q = manager.FilterByOwner(ctx, q, manager, userCred, ownerId, queryScope)
 		q = manager.FilterBySystemAttributes(q, userCred, query, queryScope)
 		q = manager.FilterByHiddenSystemAttributes(q, userCred, query, queryScope)
+		// TYC 双管道 B：行级数据权限过滤（非 TYC 用户零影响）
+		if userCred != nil {
+			ctx = InjectTycScopeToCtxIfNeeded(ctx, userCred.GetUserId())
+			q = ApplyPolicyFilterWithTycScope(ctx, q, manager, manager.ResourceScope(), queryScope)
+		}
 	}
 
 	if isShowDetails(query) {
