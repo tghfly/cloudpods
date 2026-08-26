@@ -65,6 +65,8 @@ pipeline {
     environment {
         OUTPUT_DIR  = "_output/bin"
         GOROOT      = "/usr/local/go"
+        GOPATH      = "/tmp/gopath"
+        GOCACHE     = "/tmp/gocache"
         PATH        = "${GOROOT}/bin:${env.PATH}"
     }
 
