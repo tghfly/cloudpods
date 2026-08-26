@@ -27,7 +27,6 @@ import (
 
 	api "yunion.io/x/onecloud/pkg/apis/identity"
 	"yunion.io/x/onecloud/pkg/keystone/cache"
-	"yunion.io/x/onecloud/pkg/keystone/driver/tyc"
 	"yunion.io/x/onecloud/pkg/keystone/keys"
 	"yunion.io/x/onecloud/pkg/keystone/models"
 	"yunion.io/x/onecloud/pkg/keystone/options"
@@ -541,35 +540,9 @@ func (t *SAuthToken) getTokenV2(
 	return &token, nil
 }
 
-// fetchUserProjectRolesWithTycScope 增强版角色获取：对 TYC 用户合并虚拟 assignments。
-// 非 TYC 用户（Extra 无 tyc_scope）直接走原生路径，零影响。
+// fetchUserProjectRolesWithTycScope 获取用户在项目上的角色。
+// 去角色化后，TYC 动作权限通过 AllowWithTycScope 管道 A 直接裁决，
+// 不再需要虚拟 assignments 注入。此函数直接返回原生角色（手工授予的仍生效）。
 func fetchUserProjectRolesWithTycScope(userId, projectId string) ([]models.SRole, error) {
-	realFn := func(uid, pid string) ([]models.SRole, error) {
-		return models.AssignmentManager.FetchUserProjectRoles(uid, pid)
-	}
-	real, err := realFn(userId, projectId)
-	if err != nil {
-		return nil, err
-	}
-	// 尝试从 SUser.Extra 加载 TycScope
-	usr, e2 := models.UserManager.FetchById(userId)
-	if e2 != nil {
-		return real, nil
-	}
-	suser, ok := usr.(*models.SUser)
-	if !ok || suser == nil || suser.Extra == nil {
-		return real, nil
-	}
-	scopeJSON, e3 := suser.Extra.GetString("tyc_scope")
-	if e3 != nil || len(scopeJSON) == 0 {
-		return real, nil
-	}
-	// 调用 tyc 包的 wrapper
-	return tyc.FetchUserProjectRolesWithIdpScope(
-		context.Background(),
-		userId, projectId,
-		realFn,
-		scopeJSON,
-		5,
-	)
+	return models.AssignmentManager.FetchUserProjectRoles(userId, projectId)
 }

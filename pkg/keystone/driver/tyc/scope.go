@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"yunion.io/x/jsonutils"
@@ -48,75 +47,71 @@ type DataScope struct {
 	ProjectIds []string       `json:"projectIds,omitempty"` // PROJECT_SET / MIXED
 }
 
+// ── ActionLevel 动作权限 3 档枚举（替代原角色映射） ────────────────────────
+
+type ActionLevel string
+
+const (
+	ActionLevelFull     ActionLevel = "full"     // 全部动作：list/get/create/update/delete/perform
+	ActionLevelEditor   ActionLevel = "editor"   // 编辑档：list/get/update/perform（禁 create/delete）
+	ActionLevelReadonly ActionLevel = "readonly" // 只读档：list/get（禁 create/update/delete/perform）
+)
+
+// ActionOverride 支持 705 接口返回的逐资源精确覆盖（优先级高于 ActionLevel 通配）
+type ActionOverride struct {
+	Service  string   `json:"service"`
+	Resource string   `json:"resource,omitempty"`
+	Allow    []string `json:"allow"`
+	Deny     []string `json:"deny,omitempty"`
+}
+
 // ── TycScope 事实快照 ──────────────────────────────────────────────────────
 
-// TycScope 是 tydic 事实 → cloudpods 鉴权的输入。
-// 每次登录全量覆盖 SUser.Extra['tyc_scope']；SnapshotAt 用于 ScopeTTL 控制运行中刷新。
 type TycScope struct {
-	TenantId    string    `json:"tenantId"`
-	TenantCode  string    `json:"tenantCode"`
-	OrgId       string    `json:"orgId"`       // 用户所属组织（来自 SystemUserDetail + SUser.Extra 归档）
-	DistrictAdm int       `json:"districtAdm"` // 1100=全区, 1000=普通
-	TycRoleName string    `json:"tycRoleName"` // 原始 tydic sysRoleName（不映射，仅排查用）
-	CloudRoleId string    `json:"cloudRoleId"` // 归一后映射到预置角色 ID：domainadmin/project_editor/project_viewer/member/viewer 之一
-	DataScope   DataScope `json:"dataScope"`
-	SnapshotAt  int64     `json:"snapshotAt"`  // unix 秒，webhook 触发刷新时写 0
+	TenantId        string           `json:"tenantId"`
+	TenantCode      string           `json:"tenantCode"`
+	OrgId           string           `json:"orgId"`
+	DistrictAdm     int              `json:"districtAdm"`
+	TycRoleName     string           `json:"tycRoleName"`
+	ActionLevel     ActionLevel      `json:"actionLevel"`
+	ActionOverrides []ActionOverride `json:"actionOverrides,omitempty"`
+	DataScope       DataScope        `json:"dataScope"`
+	SnapshotAt      int64            `json:"snapshotAt"`
 }
 
-// 预置角色名（与 pkg/keystone/locale/predefined_policies.go 对齐）
-const (
-	PredefRoleNameDomainAdmin   = "domainadmin"
-	PredefRoleNameProjectOwner  = "project_owner"
-	PredefRoleNameProjectEditor = "project_editor"
-	PredefRoleNameProjectViewer = "project_viewer"
-	PredefRoleNameMember        = "member"
-	PredefRoleNameViewer        = "project_viewer"
-)
-
-// roleIdCache 进程级缓存：roleName → SRole.Id（按需查一次，之后复用）
-var (
-	roleIdCacheMu   sync.Mutex
-	roleIdCacheMap  = map[string]string{}
-)
-
-// resolveRoleId 按角色名查真实 SRole.Id，带进程级缓存
-func resolveRoleId(roleName string) string {
-	roleIdCacheMu.Lock()
-	if id, ok := roleIdCacheMap[roleName]; ok {
-		roleIdCacheMu.Unlock()
-		return id
+// ActionsForLevel 返回 ActionLevel 对应的允许动作列表
+func ActionsForLevel(level ActionLevel) []string {
+	switch level {
+	case ActionLevelFull:
+		return []string{"list", "get", "create", "update", "delete", "perform"}
+	case ActionLevelEditor:
+		return []string{"list", "get", "update", "perform"}
+	case ActionLevelReadonly:
+		return []string{"list", "get"}
+	default:
+		return []string{"list", "get"}
 	}
-	roleIdCacheMu.Unlock()
+}
 
-	role, err := models.RoleManager.FetchRoleByName(roleName, "", "")
-	if err != nil || role == nil {
-		return roleName
+// MapTycToActionLevel 从 tydic 事实推导 ActionLevel（不映射角色）
+func MapTycToActionLevel(districtAdm int, tycRoleName string) ActionLevel {
+	if districtAdm == 1100 {
+		return ActionLevelFull
 	}
-	roleIdCacheMu.Lock()
-	roleIdCacheMap[roleName] = role.Id
-	roleIdCacheMu.Unlock()
-	return role.Id
+	name := strings.ToLower(strings.TrimSpace(tycRoleName))
+	switch {
+	case strContainsAny(name, "admin", "管理员", "owner"):
+		return ActionLevelFull
+	case strContainsAny(name, "editor", "编辑", "运维", "操作员"):
+		return ActionLevelEditor
+	default:
+		return ActionLevelReadonly
+	}
 }
 
-// InvalidateRoleIdCache 供热加载/测试时清除缓存
-func InvalidateRoleIdCache() {
-	roleIdCacheMu.Lock()
-	roleIdCacheMap = map[string]string{}
-	roleIdCacheMu.Unlock()
-}
+// ── 内部工具 ──────────────────────────────────────────────────────────────
 
-// 兼容旧占位符常量（供 DedupeAndCapAssignments 优先级 map 使用）——值动态解析
-func predefDomainAdminId() string   { return resolveRoleId(PredefRoleNameDomainAdmin) }
-func predefProjectOwnerId() string  { return resolveRoleId(PredefRoleNameProjectOwner) }
-func predefProjectEditorId() string { return resolveRoleId(PredefRoleNameProjectEditor) }
-func predefProjectViewerId() string { return resolveRoleId(PredefRoleNameProjectViewer) }
-func predefMemberId() string        { return resolveRoleId(PredefRoleNameMember) }
-
-// ── 本文件内小型工具（与 client.go 同名工具通过作用域区分，前缀 scope_） ─
-
-func scope_toLowerTrim(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-
-func scope_containsAny(s string, subs ...string) bool {
+func strContainsAny(s string, subs ...string) bool {
 	for _, x := range subs {
 		if strings.Contains(s, x) {
 			return true
@@ -125,7 +120,7 @@ func scope_containsAny(s string, subs ...string) bool {
 	return false
 }
 
-func scope_nonEmptyUnique(xs ...string) []string {
+func nonEmptyUnique(xs ...string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(xs))
 	for _, x := range xs {
@@ -142,25 +137,6 @@ func scope_nonEmptyUnique(xs ...string) []string {
 	return out
 }
 
-// MapTycRoleToPredefined：tydic 角色名 → 预置角色真实 ID。不建自定义角色。
-func MapTycRoleToPredefined(districtAdm int, tycRoleName string) string {
-	if districtAdm == 1100 {
-		return predefDomainAdminId()
-	}
-	name := scope_toLowerTrim(tycRoleName)
-	switch {
-	case scope_containsAny(name, "admin", "管理员"):
-		return predefProjectOwnerId()
-	case scope_containsAny(name, "editor", "编辑", "运维", "操作员"):
-		return predefProjectEditorId()
-	case scope_containsAny(name, "viewer", "只读", "访客"):
-		return predefProjectViewerId()
-	case scope_containsAny(name, "member", "成员"):
-		return predefMemberId()
-	}
-	return predefMemberId()
-}
-
 // BuildTycScopeFromDetail 把 tydic 返回的 SystemUserDetail → TycScope。
 // 优先级：直接读 705 dataScope / orgScope / projectScope（有字段时） → 回退按 districtAdm / sysRoleId / projectId 推测。
 func BuildTycScopeFromDetail(ctx context.Context, conf api.STycIdpConfigOptions, detail *SystemUserDetail, idx *OrgTreeIndex) (*TycScope, error) {
@@ -173,7 +149,7 @@ func BuildTycScopeFromDetail(ctx context.Context, conf api.STycIdpConfigOptions,
 		OrgId:       detail.OrgId,
 		DistrictAdm: detail.DistrictAdm,
 		TycRoleName: detail.SysRoleName,
-		CloudRoleId: MapTycRoleToPredefined(detail.DistrictAdm, detail.SysRoleName),
+		ActionLevel: MapTycToActionLevel(detail.DistrictAdm, detail.SysRoleName),
 		SnapshotAt:  time.Now().Unix(),
 	}
 
@@ -184,7 +160,7 @@ func BuildTycScopeFromDetail(ctx context.Context, conf api.STycIdpConfigOptions,
 	}
 
 	// ── 2) 回退推测口径（Phase 0 如发现 705 无 dataScope 字段，用这套） ──
-	projectIds := scope_nonEmptyUnique(append([]string{detail.ProjectId}, detail.ProjectIdList...)...)
+	projectIds := nonEmptyUnique(append([]string{detail.ProjectId}, detail.ProjectIdList...)...)
 	switch {
 	case detail.DistrictAdm == 1100:
 		scope.DataScope = DataScope{Level: DataScopeDomainAll}
@@ -256,9 +232,9 @@ func LoadFromCred(ctx context.Context, cred mcclient.TokenCredential) (*TycScope
 
 type OrgTreeIndex struct {
 	TenantId               string
-	OrgAncestorsByOrgId    map[string][]string          // orgId → [根…self]
-	BindProjectByOrgId     map[string]string            // orgId → ORG-xxx 组织项目 SProject.Id
-	DomainRootOrgProjectId string                       // ORG-O000 的 ProjectId（给 DOMAIN_ALL 档挂 role）
+	OrgAncestorsByOrgId    map[string][]string // orgId → [根…self]
+	BindProjectByOrgId     map[string]string   // orgId → ORG-xxx 组织项目 SProject.Id
+	DomainRootOrgProjectId string              // ORG-O000 的 ProjectId（给 DOMAIN_ALL 档挂 role）
 }
 
 func NewOrgTreeIndex(tenantId string) *OrgTreeIndex {
