@@ -63,7 +63,9 @@ pipeline {
     }
 
     environment {
-        OUTPUT_DIR = "_output/bin"
+        OUTPUT_DIR  = "_output/bin"
+        GOROOT      = "/usr/local/go"
+        PATH        = "${GOROOT}/bin:${env.PATH}"
     }
 
     stages {
