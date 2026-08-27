@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"yunion.io/x/jsonutils"
+	"yunion.io/x/log"
 	"yunion.io/x/pkg/errors"
 
 	api "yunion.io/x/onecloud/pkg/apis/identity"
@@ -196,6 +197,8 @@ func (c *TYCHttpClient) ExchangeToken(ctx context.Context, token, _userIdHint, _
 	})
 	txnId := newTxnId()
 	_, sign := c.signPayload(txnId, svcCont, secret)
+	// DEBUG: 打印发出的 txnId + svcCont + sign，便于核对 MD5 与 tydic 拒绝原因
+	log.Debugf("tyc getUserInfoByToken txndId=%s svcCont=%s sign=%s", txnId, string(svcCont), sign)
 	// tcpCont 仅 transactionId/sign/appKey；参考实现不传 reqTime / dstSysId
 	root := map[string]interface{}{
 		"tcpCont": map[string]interface{}{
