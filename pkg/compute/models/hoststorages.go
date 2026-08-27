@@ -77,7 +77,7 @@ type SHoststorage struct {
 	IsRootPartition bool `nullable:"true" default:"false" list:"domain" update:"domain" create:"optional"`
 
 	// 配置信息
-	Config *jsonutils.JSONArray `nullable:"true" get:"domain" json:"config"`
+	Config *jsonutils.JSONArray `nullable:"true" list:"domain" get:"domain" json:"config"`
 	// 真实容量大小
 	RealCapacity int64 `nullable:"true" list:"domain" json:"real_capacity"`
 }
