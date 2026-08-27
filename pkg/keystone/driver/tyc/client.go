@@ -17,8 +17,8 @@ package tyc
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
 	"crypto"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -48,13 +48,14 @@ import (
 
 // TYCHttpClient 封装 /sso/getUserInfoByToken 和 /esmp-serve-rest/rest/serve/doService(svcCode) 两种接口。
 // 签名：
-//   signTemp = MD5(transactionId + svcCont JSON + SecretKey)  // 32 位小写
-//   sign = RSA_Sign(signTemp)   // 如果现场启用 RSA；否则退化纯 MD5，直接写 sign=signTemp
+//
+//	signTemp = MD5(transactionId + svcCont JSON + SecretKey)  // 32 位小写
+//	sign = RSA_Sign(signTemp)   // 如果现场启用 RSA；否则退化纯 MD5，直接写 sign=signTemp
 type TYCHttpClient struct {
-	conf     api.STycIdpConfigOptions
-	httpCli  *http.Client
-	rsaKey   *rsa.PrivateKey // 当 conf.EnableRSA=true 时使用
-	mu       sync.Mutex
+	conf    api.STycIdpConfigOptions
+	httpCli *http.Client
+	rsaKey  *rsa.PrivateKey // 当 conf.EnableRSA=true 时使用
+	mu      sync.Mutex
 }
 
 // NewTYCHttpClient 构造器
@@ -187,17 +188,19 @@ func (c *TYCHttpClient) ExchangeToken(ctx context.Context, token, _userIdHint, _
 		return nil, httperrors.NewInternalServerError("invalid tyc base_url: %v", err)
 	}
 	u.Path = joinPaths(u.Path, "/sso/getUserInfoByToken")
-	svcCont, _ := json.Marshal(struct {
-		Token string `json:"token"`
-	}{Token: token})
+	// svcCont 结构 = {"requestObject":{"token": ...}}，与已联调通过的参考实现
+	// （AuthController.fySsoTokenLogin / ssologin_app.ssoCheck）完全一致，
+	// 否则 tydic 侧按同规则重算的签名与报文不符 → 返回 500。
+	svcCont, _ := json.Marshal(map[string]interface{}{
+		"requestObject": map[string]string{"token": token},
+	})
 	txnId := newTxnId()
 	_, sign := c.signPayload(txnId, svcCont, secret)
+	// tcpCont 仅 transactionId/sign/appKey；参考实现不传 reqTime / dstSysId
 	root := map[string]interface{}{
 		"tcpCont": map[string]interface{}{
 			"transactionId": txnId,
-			"reqTime":       newReqTime(),
 			"appKey":        c.conf.AppKey,
-			"dstSysId":      c.conf.DstSysId,
 			"sign":          sign,
 		},
 		"svcCont": json.RawMessage(svcCont),
@@ -275,26 +278,22 @@ func (c *TYCHttpClient) callService(ctx context.Context, svcCode string, svcReq 
 		return nil, httperrors.NewInternalServerError("invalid tyc base_url: %v", err)
 	}
 	u.Path = joinPaths(u.Path, "/esmp-serve-rest/rest/serve/doService")
-	svcCont, err := json.Marshal(struct {
-		SvcCode    string      `json:"svcCode"`
-		AppId      string      `json:"appId,omitempty"`
-		Parameters interface{} `json:"parameters"`
-	}{
-		SvcCode:    svcCode,
-		AppId:      c.conf.AppId,
-		Parameters: svcReq,
+	// svcCont 结构 = {"requestObject": {业务字段}}，svcCode 放在 tcpCont；
+	// 与参考实现（fySsoTokenLogin / ssoCheck 的 doService 调用）一致。
+	svcCont, err := json.Marshal(map[string]interface{}{
+		"requestObject": svcReq,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal svcCont")
 	}
 	txnId := newTxnId()
 	_, sign := c.signPayload(txnId, svcCont, secret)
+	// tcpCont 含 svcCode + appKey，但参考实现不传 reqTime / dstSysId
 	root := map[string]interface{}{
 		"tcpCont": map[string]interface{}{
 			"transactionId": txnId,
-			"reqTime":       newReqTime(),
 			"appKey":        c.conf.AppKey,
-			"dstSysId":      c.conf.DstSysId,
+			"svcCode":       svcCode,
 			"sign":          sign,
 		},
 		"svcCont": json.RawMessage(svcCont),
