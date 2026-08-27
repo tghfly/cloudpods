@@ -905,6 +905,7 @@ func (adapter *MegaRaidAdaptor) megacliEnableJBOD(enable bool) bool {
 	return true
 }
 
+// [AI:START] tool=claude author=tangguanghui@tydic.com
 func (adapter *MegaRaidAdaptor) megacliBuildJBOD(devs []*baremetal.BaremetalStorage) error {
 	if !adapter.megacliIsJBODEnabled() {
 		adapter.megacliEnableJBOD(true)
@@ -914,18 +915,37 @@ func (adapter *MegaRaidAdaptor) megacliBuildJBOD(devs []*baremetal.BaremetalStor
 	if !adapter.megacliIsJBODEnabled() {
 		return fmt.Errorf("JBOD not supported")
 	}
+	// 通过 storcli 查询盘状态，过滤掉已经是 JBOD 的盘
+	states, _ := storcliGetPDStates(adapter.GetStorcliCommand, adapter.getTerm())
+	needConvert := make([]*baremetal.BaremetalStorage, 0, len(devs))
+	for _, d := range devs {
+		specStr := GetSpecString(d)
+		if states != nil {
+			if state, ok := states[specStr]; ok && isStorcliPDJBOD(state) {
+				log.Infof("megacliBuildJBOD: dev %s already JBOD, skip", specStr)
+				continue
+			}
+		}
+		needConvert = append(needConvert, d)
+	}
+	if len(needConvert) == 0 {
+		log.Infof("megacliBuildJBOD: all devs already JBOD, nothing to do")
+		return nil
+	}
 	// try clear jbod disk of devices
-	if err := adapter.megacliClearJBODDisks(devs); err != nil {
+	if err := adapter.megacliClearJBODDisks(needConvert); err != nil {
 		log.Warningf("try clear megaraid jbod disks before make jbod: %s", err)
 	}
 	devIds := []string{}
-	for _, d := range devs {
+	for _, d := range needConvert {
 		devIds = append(devIds, GetSpecString(d))
 	}
 	cmd := GetCommand("-PDMakeJBOD", fmt.Sprintf("-PhysDrv[%s]", strings.Join(devIds, ",")), fmt.Sprintf("-a%d", adapter.index))
 	_, err := adapter.remoteRun(cmd)
 	return err
 }
+
+// [AI:END]
 
 func (adapter *MegaRaidAdaptor) RemoveLogicVolumes() error {
 	lvIdx, err := adapter.GetLogicVolumes()
@@ -992,7 +1012,26 @@ func (adapter *MegaRaidAdaptor) megacliClearAllJBODDisks() error {
 	return adapter.megacliClearJBODDisks(allDevs)
 }
 
+// [AI:START] tool=claude author=tangguanghui@tydic.com
 func (adapter *MegaRaidAdaptor) clearJBODDisks() {
+	// 1. 先关闭控制器 JBOD 模式，释放盘的 JBOD 占用，
+	//    否则后续 PDMakeGood / set good 会因为盘仍被 JBOD 锁定而失败
+	adapter.megacliEnableJBOD(false)
+	storcliEnableJBOD(adapter.GetStorcliCommand, adapter.getTerm(), false)
+
+	// 2. 清除 Foreign Configuration，防止残留元数据阻塞状态转换
+	clearForeignCmd := GetCommand("-CfgForeign", "-Clear", fmt.Sprintf("-a%d", adapter.index))
+	if _, err := adapter.remoteRun(clearForeignCmd); err != nil {
+		log.Warningf("megacli CfgForeign clear: %v", err)
+	}
+	clearForeignCmd2, err := adapter.GetStorcliCommand("fall", "delete")
+	if err == nil {
+		if _, err := adapter.remoteRun(clearForeignCmd2); err != nil {
+			log.Warningf("storcli foreign delete: %v", err)
+		}
+	}
+
+	// 3. 执行 PDMakeGood / set good force，将盘从 JBOD/offline 转为 UGood
 	if err := adapter.megacliClearAllJBODDisks(); err != nil {
 		log.Errorf("megacliClearAllJBODDisks error: %v", err)
 		log.Infof("try storcliClearJBODDisks")
@@ -1000,11 +1039,9 @@ func (adapter *MegaRaidAdaptor) clearJBODDisks() {
 			log.Errorf("storcliClearJBODDisks error: %v", err)
 		}
 	}
-	adapter.megacliEnableJBOD(true)
-	adapter.megacliEnableJBOD(false)
-	adapter.megacliEnableJBOD(true)
-	adapter.megacliEnableJBOD(false)
 }
+
+// [AI:END]
 
 type MegaRaid struct {
 	term       raid.IExecTerm

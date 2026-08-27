@@ -81,10 +81,11 @@ func storcliGetPDStates(
 	getCmd func(args ...string) (string, error),
 	term raid.IExecTerm,
 ) (map[string]string, error) {
-	cmd, err := getCmd("eall/sall", "show", "J")
+	base, err := getCmd()
 	if err != nil {
 		return nil, errors.Wrap(err, "get storcli PD list cmd")
 	}
+	cmd := fmt.Sprintf("%s/eall/sall show J", base)
 	lines, err := term.Run(cmd)
 	if err != nil {
 		return nil, errors.Wrap(err, "run storcli eall/sall show J")
@@ -199,13 +200,30 @@ func storcliBuildNoRaid(
 	return err
 }
 
+// [AI:START] tool=claude author=tangguanghui@tydic.com
 func storcliClearJBODDisks(
 	getCmd func(args ...string) (string, error),
 	term raid.IExecTerm,
 	devs []*MegaRaidPhyDev,
 ) error {
+	// 预查询盘状态，已为 UGood 的盘跳过，避免无谓的状态转换
+	states, err := storcliGetPDStates(getCmd, term)
+	if err != nil {
+		log.Warningf("storcliClearJBODDisks: get PD states: %v", err)
+		states = nil
+	}
 	errs := make([]error, 0)
 	for _, dev := range devs {
+		specStr := fmt.Sprintf("%d:%d", dev.enclosure, dev.slot)
+		if states != nil {
+			if state, ok := states[specStr]; ok {
+				lower := strings.ToLower(strings.TrimSpace(state))
+				if strings.Contains(lower, "ugood") || strings.Contains(lower, "unconfigured(good)") {
+					log.Infof("storcliClearJBODDisks: dev %s already UGood, skip", specStr)
+					continue
+				}
+			}
+		}
 		cmd, err := getCmd()
 		if err != nil {
 			return errors.Wrap(err, "get cmd error")
@@ -218,6 +236,8 @@ func storcliClearJBODDisks(
 	}
 	return errors.NewAggregate(errs)
 }
+
+// [AI:END]
 
 func storcliBuildRaid(
 	getCmd func(args ...string) (string, error),

@@ -42,6 +42,19 @@ def calculate_total(items):
 - 改代码前先 `grep` 或搜索 `docs/superpowers/` 确认是否有相关设计文档
 - 有则同步更新文档中对应的章节（接口定义、表结构、流程图等）
 - 文档更新与代码变更在**同一次提交**中完成，commit message 中注明 `docs: sync ...`
+
+## 服务缺陷与功能文档规范
+
+每次对服务（`pkg/<svc>/` 主目录对应的服务）做**缺陷修复**或**新增功能**时，**必须**在 `docs/<svc>/` 下新建一条按日期命名的记录文档，与代码变更一起提交。
+
+- 文件名：`YYYY-MM-DD-<short-slug>.md`，全小写、连字符
+- 服务目录命名与代码主目录对齐（`docs/baremetal/` ↔ `pkg/baremetal/`、`docs/hostman/` ↔ `pkg/hostman/`，以此类推）
+- 单文档要素：现象 / 错误码 / 根因 / 修复（含 `file:line`）/ 影响与回滚 / 运维步骤
+- 服务目录首次建立时需创建 `README.md` 作为索引；跨服务的通用约定见 [docs/README.md](docs/README.md)
+- 与代码变更放在**同一次提交**，commit message 加 `docs:` 前缀（如 `fix(megactl): ..., docs: 2026-08-27-megaraid-...`）
+
+本规范与上文的"设计/规格文档"（`docs/superpowers/specs/`、`docs/superpowers/plans/`）互不替代：规格文档描述"要做什么"，本规范记录"做了什么、改了什么、为什么改"。
+
 ## Overview
 
 Cloudpods is a cloud-native multi/hybrid-cloud management platform written in Go ("a cloud on clouds"). Module path: `yunion.io/x/onecloud`, Go 1.24. It manages KVM/baremetal/on-premise resources plus public clouds (AWS, Azure, GCP, Alibaba, Huawei, etc.) behind one unified REST API.
