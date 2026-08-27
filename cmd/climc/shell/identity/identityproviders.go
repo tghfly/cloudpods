@@ -305,6 +305,66 @@ func init() {
 		return nil
 	})
 
+	type IdentityProviderCreateTYCOptions struct {
+		NAME string `help:"name of identity provider" json:"-"`
+
+		AutoCreateProject   bool `help:"automatically create a default project when importing domain" json:"-"`
+		NoAutoCreateProject bool `help:"do not create default project when importing domain" json:"-"`
+		AutoCreateUser      bool `help:"automatically create a user" json:"-"`
+		NoAutoCreateUser    bool `help:"do not automatically create a user" json:"-"`
+
+		TargetDomain string `help:"target domain without creating new domain" json:"-"`
+
+		api.STycIdpConfigOptions
+	}
+	R(&IdentityProviderCreateTYCOptions{}, "idp-create-tyc", "Create an identity provider with tydic tyc driver", func(s *mcclient.ClientSession, args *IdentityProviderCreateTYCOptions) error {
+		params := jsonutils.NewDict()
+		params.Add(jsonutils.NewString(args.NAME), "name")
+
+		if len(args.TargetDomain) > 0 {
+			params.Add(jsonutils.NewString(args.TargetDomain), "target_domain")
+		}
+		if args.AutoCreateProject {
+			params.Add(jsonutils.JSONTrue, "auto_create_project")
+		} else if args.NoAutoCreateProject {
+			params.Add(jsonutils.JSONFalse, "auto_create_project")
+		}
+		if args.AutoCreateUser {
+			params.Add(jsonutils.JSONTrue, "auto_create_user")
+		} else if args.NoAutoCreateUser {
+			params.Add(jsonutils.JSONFalse, "auto_create_user")
+		}
+
+		params.Add(jsonutils.NewString("tyc"), "driver")
+		params.Add(jsonutils.NewString(api.IdpTemplateTyc), "template")
+
+		params.Add(jsonutils.Marshal(args), "config", "tyc")
+
+		idp, err := modules.IdentityProviders.Create(s, params)
+		if err != nil {
+			return err
+		}
+		printObject(idp)
+		return nil
+	})
+
+	// [AI:START] tool=claude date=2026-08-27 author=yangzhenwang
+	type IdentityProviderConfigTYCOptions struct {
+		ID string `help:"ID of idp to config" json:"-"`
+		api.STycIdpConfigOptions
+	}
+	R(&IdentityProviderConfigTYCOptions{}, "idp-config-tyc", "Config an Identity provider with tydic tyc driver", func(s *mcclient.ClientSession, args *IdentityProviderConfigTYCOptions) error {
+		config := jsonutils.NewDict()
+		config.Add(jsonutils.Marshal(args), "config", "tyc")
+		nconf, err := modules.IdentityProviders.PerformAction(s, args.ID, "config", config)
+		if err != nil {
+			return err
+		}
+		fmt.Println(nconf.PrettyString())
+		return nil
+	})
+	// [AI:END]
+
 	type IdentityProviderConfigCASOptions struct {
 		ID string `help:"ID of idp to config" json:"-"`
 		api.SCASIdpConfigOptions

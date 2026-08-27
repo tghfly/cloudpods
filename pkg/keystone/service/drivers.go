@@ -27,4 +27,5 @@ import (
 	_ "yunion.io/x/onecloud/pkg/keystone/driver/oidc"
 	_ "yunion.io/x/onecloud/pkg/keystone/driver/saml"
 	_ "yunion.io/x/onecloud/pkg/keystone/driver/sql"
+	_ "yunion.io/x/onecloud/pkg/keystone/driver/tyc"
 )
