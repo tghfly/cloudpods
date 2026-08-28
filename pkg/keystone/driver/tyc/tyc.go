@@ -76,18 +76,19 @@ func NewTycDriver(idpId, idpName, template, targetDomainId string, tconf api.TCo
 // Authenticate 实现 IIdentityBackend.Authenticate。
 //
 // 流程（对齐 CAS 模式）：
-//   1. ident.Password.User.Password = tydic 门户 token（ident.Password.User.Name = sysUserCode）
-//   2. client.ExchangeToken → SystemUserDetail
-//   3. idp.SyncOrCreateDomainAndUser → 写 SDomain + SUser + id_mapping
-//   4. SUser.Extra 写 raw tydic 字段 + BuildTycScopeFromDetail().MarshalJSON 快照
-//   5. UserManager.Update(ctx, user, diff) → 持久化 Extra
-//   6. 缓存 detail 到 self.lastDetail（给 PostAuthenticate 重建 DTO，不必再查 DB）
-//   7. FetchUserExtended → 返回 API 类型
+//  1. ident.Password.User.Password = tydic 门户 token（ident.Password.User.Name = sysUserCode）
+//  2. client.ExchangeToken → SystemUserDetail
+//  3. idp.SyncOrCreateDomainAndUser → 写 SDomain + SUser + id_mapping
+//  4. SUser.Extra 写 raw tydic 字段 + BuildTycScopeFromDetail().MarshalJSON 快照
+//  5. UserManager.Update(ctx, user, diff) → 持久化 Extra
+//  6. 缓存 detail 到 self.lastDetail（给 PostAuthenticate 重建 DTO，不必再查 DB）
+//  7. FetchUserExtended → 返回 API 类型
 func (self *STycDriver) Authenticate(ctx context.Context, identity mcclient.SAuthenticationIdentity) (*api.SUserExtended, error) {
 	token := identity.Password.User.Password
-	hintCode := identity.Password.User.Name
-	hintId := identity.Password.User.Id
-	detail, err := self.client.ExchangeToken(ctx, token, hintId, hintCode)
+	// Password.User.Id：前端传了 transaction_id 就用它，保持与 tydic 防重放一致；
+	// 空串则驱动内部自生成 newTxnId()。
+	extTxnId := identity.Password.User.Id
+	detail, err := self.client.ExchangeToken(ctx, token, extTxnId)
 	if err != nil {
 		return nil, errors.Wrap(err, "tyc token exchange (identity acquire: HARD FAIL)")
 	}
