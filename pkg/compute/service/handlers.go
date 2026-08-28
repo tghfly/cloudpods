@@ -277,6 +277,7 @@ func InitHandlers(app *appsrv.Application, isSlave bool) {
 		models.HostwireManagerDeprecated,
 		models.HostnetworkManager,
 		models.HoststorageManager,
+		// [AGC:START] tool=Cc date=2026-08-26 author=sniper / models.BaremetalStorageMountManager, / // [AGC:END]
 		models.HostBackupstorageManager,
 		models.HostschedtagManager,
 		models.HostIsolatedDeviceModelManager,
