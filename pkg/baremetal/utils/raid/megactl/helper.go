@@ -44,12 +44,16 @@ func storcliIsJBODEnabled(
 		line = strings.ToLower(line)
 		if strings.HasPrefix(line, "jbod") {
 			data := strings.Split(line, " ")
-			if strings.TrimSpace(data[len(data)-1]) == "on" {
-				return true
-			}
-			return false
+			enabled := strings.TrimSpace(data[len(data)-1]) == "on"
+			// [AGC:START] tool=Cc date=2026-08-28 author=sniper / JBOD 开关状态落日志（诊断可见性：现场无法 SSH 时日志即现场） /
+			log.Infof("storcliIsJBODEnabled: controller jbod = %v (line: %q)", enabled, line)
+			// [AGC:END]
+			return enabled
 		}
 	}
+	// [AGC:START] tool=Cc date=2026-08-28 author=sniper / 未匹配到 jbod 状态行，按未启用处理并落日志 /
+	log.Warningf("storcliIsJBODEnabled: no jbod line in output, treat as disabled")
+	// [AGC:END]
 	return false
 }
 
@@ -71,6 +75,9 @@ func storcliEnableJBOD(
 		log.Errorf("EnableJBOD %v fail: %v", enable, err)
 		return false
 	}
+	// [AGC:START] tool=Cc date=2026-08-28 author=sniper / 启用结果落日志（诊断可见性） /
+	log.Infof("storcliEnableJBOD: set jbod=%s success", val)
+	// [AGC:END]
 	return true
 }
 
@@ -85,11 +92,18 @@ func storcliGetPDStates(
 	if err != nil {
 		return nil, errors.Wrap(err, "get storcli PD list cmd")
 	}
+	// [AGC:START] tool=Cc date=2026-08-28 author=sniper / 语法版本兼容：新语法 "eall/sall show J" 失败（部分 storcli 版本报 TOKEN_EALL）时降级为带斜杠老语法 "/eall/sall show J" /
 	cmd := fmt.Sprintf("%s/eall/sall show J", base)
 	lines, err := term.Run(cmd)
 	if err != nil {
-		return nil, errors.Wrap(err, "run storcli eall/sall show J")
+		log.Warningf("storcliGetPDStates: run %s error: %v, fallback to legacy syntax", cmd, err)
+		cmd = fmt.Sprintf("%s /eall /sall show J", base)
+		lines, err = term.Run(cmd)
+		if err != nil {
+			return nil, errors.Wrapf(err, "run storcli %s", cmd)
+		}
 	}
+	// [AGC:END]
 	info, err := parseStorcliControllers(strings.Join(lines, "\n"))
 	if err != nil {
 		return nil, errors.Wrap(err, "parseStorcliControllers")

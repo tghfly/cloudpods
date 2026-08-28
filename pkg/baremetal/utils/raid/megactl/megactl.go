@@ -255,6 +255,9 @@ type MegaRaidAdaptor struct {
 	funcNumber   string
 	// used by sg_map
 	hostNum int
+	// [AGC:START] tool=Cc date=2026-08-28 author=sniper / 部署环境架构探测结果缓存（nil=未探测；agent 自身架构≠部署环境架构，须用 term 探测） /
+	arm64Env *bool
+	// [AGC:END]
 	//channelNum int
 
 	minStripSize int
@@ -855,7 +858,32 @@ func (adapter *MegaRaidAdaptor) storcliBuildNoRaid(devs []*baremetal.BaremetalSt
 	return storcliBuildNoRaid(adapter.GetStorcliCommand, adapter.getTerm(), devs)
 }
 
-func (adapter *MegaRaidAdaptor) megacliBuildNoRaid(devs []*baremetal.BaremetalStorage, _ *api.BaremetalDiskConfig) error {
+// [AGC:START] tool=Cc date=2026-08-28 author=sniper / 探测部署环境架构（uname -m 含 aarch64/arm64 判 ARM64；探测失败默认 false 走原路径，安全退化） /
+func (adapter *MegaRaidAdaptor) isArm64Env() bool {
+	if adapter.arm64Env != nil {
+		return *adapter.arm64Env
+	}
+	isArm := false
+	lines, err := adapter.remoteRun("uname -m")
+	if err == nil && len(lines) > 0 {
+		arch := strings.ToLower(strings.TrimSpace(strings.Join(lines, "")))
+		isArm = strings.Contains(arch, "aarch64") || strings.Contains(arch, "arm64")
+	} else if err != nil {
+		log.Warningf("isArm64Env: uname -m fail: %v, treat as non-arm", err)
+	}
+	adapter.arm64Env = &isArm
+	log.Infof("MegaRaid adaptor %d deploy env arch arm64 = %v", adapter.index, isArm)
+	return isArm
+}
+
+// [AGC:END]
+
+func (adapter *MegaRaidAdaptor) megacliBuildNoRaid(devs []*baremetal.BaremetalStorage, conf *api.BaremetalDiskConfig) error {
+	// [AGC:START] tool=Cc date=2026-08-28 author=sniper / ARM64 部署环境 MegaCli64（x86 二进制）不可执行，直接走 storcli 路径，避免白跑与 JBOD 启用失效 /
+	if adapter.isArm64Env() {
+		return adapter.storcliBuildNoRaid(devs, conf)
+	}
+	// [AGC:END]
 	err := adapter.megacliBuildJBOD(devs)
 	if err == nil {
 		return nil

@@ -176,7 +176,7 @@ type TycStandardResp struct {
 // ExchangeToken 实现"路径 B：/sso/getUserInfoByToken 换人"。
 // 生产强制走这条；路径 A Base64 decode 只在调试时单独 helper（未暴露给 Authenticate）。
 // 返回的错误会被 Authenticate 当 HARD FAIL 终止登录。
-func (c *TYCHttpClient) ExchangeToken(ctx context.Context, token, _userIdHint, _userNameHint string) (*SystemUserDetail, error) {
+func (c *TYCHttpClient) ExchangeToken(ctx context.Context, token, extTxnId string) (*SystemUserDetail, error) {
 	if len(token) == 0 {
 		return nil, httperrors.NewUnauthorizedError("empty tyc token: HARD FAIL")
 	}
@@ -195,7 +195,12 @@ func (c *TYCHttpClient) ExchangeToken(ctx context.Context, token, _userIdHint, _
 	svcCont, _ := json.Marshal(map[string]interface{}{
 		"requestObject": map[string]string{"token": token},
 	})
-	txnId := newTxnId()
+	// 前端传了 transaction_id 就用外部的（便于 tydic 侧追踪/防重放对齐），
+	// 空串则内部自生成 28 位流水号。
+	txnId := extTxnId
+	if len(txnId) == 0 {
+		txnId = newTxnId()
+	}
 	_, sign := c.signPayload(txnId, svcCont, secret)
 	// DEBUG: 打印发出的 txnId + svcCont + sign，便于核对 MD5 与 tydic 拒绝原因
 	log.Warningf("tyc getUserInfoByToken txndId=%s svcCont=%s sign=%s", txnId, string(svcCont), sign)
