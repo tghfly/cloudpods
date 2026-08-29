@@ -154,6 +154,17 @@ func (r *SBaseRedfishClient) Patch(ctx context.Context, path string, body jsonut
 	return resp, err
 }
 
+// [AGC:START] tool=Cc date=2026-08-28 author=tangguanghui@tydic.com
+func (r *SBaseRedfishClient) PatchWithHeader(ctx context.Context, path string, header http.Header, body jsonutils.JSONObject) (http.Header, jsonutils.JSONObject, error) {
+	return r.request(ctx, httputils.PATCH, path, header, body)
+}
+
+func (r *SBaseRedfishClient) GetRequestHeader(ctx context.Context, path string) (http.Header, jsonutils.JSONObject, error) {
+	return r.request(ctx, httputils.GET, path, nil, nil)
+}
+
+// [AGC:END]
+
 func (r *SBaseRedfishClient) Post(ctx context.Context, path string, body jsonutils.JSONObject) (http.Header, jsonutils.JSONObject, error) {
 	return r.request(ctx, httputils.POST, path, nil, body)
 }

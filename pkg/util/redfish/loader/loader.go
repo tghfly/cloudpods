@@ -18,6 +18,7 @@ import (
 	"yunion.io/x/log"
 
 	_ "yunion.io/x/onecloud/pkg/util/redfish/generic"
+	_ "yunion.io/x/onecloud/pkg/util/redfish/huawei"
 	_ "yunion.io/x/onecloud/pkg/util/redfish/idrac"
 	_ "yunion.io/x/onecloud/pkg/util/redfish/idrac9"
 	_ "yunion.io/x/onecloud/pkg/util/redfish/ilo"

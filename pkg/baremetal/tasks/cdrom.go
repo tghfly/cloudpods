@@ -17,6 +17,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -104,11 +105,21 @@ func (self *SBaremetalCdromTask) DoInsertISO(ctx context.Context, args interface
 	if !fileutils2.Exists(localImagePath) {
 		return errors.Error("image not cached")
 	}
-	imageBaseUrl := self.Baremetal.GetImageUrl(true)
+	// [AGC:START] tool=Cc date=2026-08-28 author=tangguanghui@tydic.com
+	imageBaseUrl := self.Baremetal.GetImageUrl(false)
+	// [AGC:END]
 	if len(imageBaseUrl) == 0 {
 		return errors.Error("empty image base url")
 	}
-	cdromPath := httputils.JoinPath(imageBaseUrl, "/images/"+imageId)
+	// [AGC:START] tool=Cc date=2026-08-28 author=tangguanghui@tydic.com
+	isoImagePath := localImagePath + ".iso"
+	if !fileutils2.Exists(isoImagePath) {
+		if err := os.Symlink(localImagePath, isoImagePath); err != nil {
+			log.Warningf("create .iso symlink failed: %v, using original path", err)
+		}
+	}
+	cdromPath := httputils.JoinPath(imageBaseUrl, "/images/"+imageId+".iso")
+	// [AGC:END]
 	err = redfish.MountVirtualCdrom(ctx, redfishCli, cdromPath, boot)
 	if err != nil {
 		return errors.Wrap(err, "MountVirtualCdrom")

@@ -43,3 +43,9 @@ pkg/generated
 out.gotext.json
 
 pkg/notify/sender/email_test.go
+
+# local dev artifacts
+.claude/
+jenkins_cookies.txt
+docs/README.md
+docs/baremetal/baremetal-onboarding-guide.md

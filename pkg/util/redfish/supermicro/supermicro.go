@@ -60,6 +60,17 @@ func NewSupermicroRedfishApi(endpoint, username, password string, debug bool) re
 
 func (r *SSupermicroRefishApi) ParseRoot(root jsonutils.JSONObject) error {
 	if root.Contains("UUID") && root.Contains("UpdateService") && root.Contains("Oem") {
+		// [AGC:START] tool=Cc date=2026-08-28 author=tangguanghui@tydic.com
+		oem, _ := root.Get("Oem")
+		if oem != nil {
+			if _, e := oem.Get("Huawei"); e == nil {
+				return errors.Error("not Supermicro: is Huawei")
+			}
+			if _, e := oem.Get("Dell"); e == nil {
+				return errors.Error("not Supermicro: is Dell")
+			}
+		}
+		// [AGC:END]
 		return nil
 	}
 	return errors.Error("not iDrac")

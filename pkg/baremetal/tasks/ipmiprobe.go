@@ -255,6 +255,17 @@ func (self *SBaremetalIpmiProbeTask) doRawIpmiProbe(ctx context.Context, cli ipm
 	if lanPlus, ok := cli.(*ipmitool.LanPlusIPMI); ok {
 		ipmiInfo.CipherSuite = lanPlus.GetCipherSuite()
 	}
+	// [AGC:START] tool=Cc date=2026-08-28 author=tangguanghui@tydic.com
+	redfishCli := redfish.NewRedfishDriver(ctx, "https://"+ipmiInfo.IpAddr, ipmiInfo.Username, ipmiInfo.Password, false)
+	if redfishCli != nil {
+		_, cdInfo, err := redfishCli.GetVirtualCdromInfo(ctx)
+		if err == nil && cdInfo.SupportAction {
+			ipmiInfo.CdromBoot = true
+			ipmiInfo.RedfishApi = true
+			log.Infof("Redfish VirtualMedia cdrom_boot detected for %s", ipmiInfo.IpAddr)
+		}
+	}
+	// [AGC:END]
 	updateData := jsonutils.Marshal(updateInfo)
 	updateData.(*jsonutils.JSONDict).Update(ipmiInfo.ToPrepareParams())
 	_, err = modules.Hosts.Update(self.Baremetal.GetClientSession(), self.Baremetal.GetId(), updateData)
