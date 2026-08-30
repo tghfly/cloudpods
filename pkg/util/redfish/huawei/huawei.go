@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"yunion.io/x/jsonutils"
 	"yunion.io/x/log"
@@ -93,6 +94,33 @@ func (r *SHuaweiRedfishApi) getVmmControlTarget(ctx context.Context, path string
 	return target, nil
 }
 
+// getAsyncTaskUrl 从 VmmControl 异步操作的响应中提取可轮询的任务 URL。
+// 华为 iBMC 对 POST 返回 HTTP 202 时：
+//   - 响应体 @odata.id 是真正的任务资源，如 /redfish/v1/TaskService/Tasks/1，
+//     可直接 GET 到含 TaskState 的 JSON；
+//   - Location 头指向 SSE 监控流，如 /redfish/v1/TaskService/Tasks/1/Monitor，
+//     GET 它返回的是 {"Messages":{...}}，没有 TaskState 字段，轮询会一直超时。
+//
+// 因此优先使用 @odata.id；仅当 @odata.id 为空时才回退到 Location，
+// 并剥离末尾的 /Monitor 后缀得到任务资源 URL。
+//
+// [AGC:START] tool=Cc date=2026-08-30 author=tangguanghui@tydic.com
+func getAsyncTaskUrl(hdr http.Header, resp jsonutils.JSONObject) string {
+	if resp != nil {
+		if taskUrl, err := resp.GetString("@odata.id"); err == nil && len(taskUrl) > 0 {
+			return taskUrl
+		}
+	}
+	if hdr != nil {
+		if taskUrl := hdr.Get("Location"); len(taskUrl) > 0 {
+			return strings.TrimSuffix(taskUrl, "/Monitor")
+		}
+	}
+	return ""
+}
+
+// [AGC:END]
+
 func (r *SHuaweiRedfishApi) MountVirtualCdrom(ctx context.Context, path string, cdromUrl string, boot bool) error {
 	r.disableHttpsCertVerification(ctx)
 	cdromUrl = r.convertToHttpsUrl(cdromUrl)
@@ -101,13 +129,36 @@ func (r *SHuaweiRedfishApi) MountVirtualCdrom(ctx context.Context, path string, 
 	if err != nil {
 		return errors.Wrap(err, "getVmmControlTarget")
 	}
+
+	disconnParams := jsonutils.NewDict()
+	disconnParams.Set("VmmControlType", jsonutils.NewString("Disconnect"))
+	dhdr, dresp, derr := r.Post(ctx, target, disconnParams)
+	if derr != nil {
+		return errors.Wrap(derr, "r.Post VmmControl Disconnect")
+	}
+	// [AGC:START] tool=Cc date=2026-08-30 author=tangguanghui@tydic.com
+	dtaskUrl := getAsyncTaskUrl(dhdr, dresp)
+	if len(dtaskUrl) > 0 {
+		if err := r.waitVmmTask(ctx, dtaskUrl); err != nil {
+			log.Warningf("Huawei VmmControl Disconnect task failed: %v", err)
+		}
+	}
+	// [AGC:END]
+
 	params := jsonutils.NewDict()
 	params.Set("VmmControlType", jsonutils.NewString("Connect"))
 	params.Set("Image", jsonutils.NewString(cdromUrl))
 
-	_, _, err = r.Post(ctx, target, params)
+	hdr, resp, err := r.Post(ctx, target, params)
 	if err != nil {
 		return errors.Wrap(err, "r.Post VmmControl Connect")
+	}
+	// [AGC:START] tool=Cc date=2026-08-30 author=tangguanghui@tydic.com
+	taskUrl := getAsyncTaskUrl(hdr, resp)
+	// [AGC:END]
+	err = r.waitVmmTask(ctx, taskUrl)
+	if err != nil {
+		return errors.Wrap(err, "waitVmmTask Connect")
 	}
 	if boot {
 		err = r.SetNextBootVirtualCdrom(ctx)
@@ -116,6 +167,31 @@ func (r *SHuaweiRedfishApi) MountVirtualCdrom(ctx context.Context, path string, 
 		}
 	}
 	return nil
+}
+
+func (r *SHuaweiRedfishApi) waitVmmTask(ctx context.Context, taskUrl string) error {
+	if len(taskUrl) == 0 {
+		return nil
+	}
+	for waited := 0; waited < 120; waited += 3 {
+		time.Sleep(3 * time.Second)
+		resp, err := r.Get(ctx, taskUrl)
+		if err != nil {
+			return errors.Wrapf(err, "Get task %s", taskUrl)
+		}
+		state, _ := resp.GetString("TaskState")
+		switch state {
+		case "Completed":
+			log.Infof("Huawei VmmControl task completed")
+			return nil
+		case "Exception", "Killed":
+			msg, _ := resp.GetString("Messages", "Message")
+			return errors.Errorf("VmmControl task failed: %s %s", state, msg)
+		default:
+			log.Debugf("Huawei VmmControl task %s, waited %ds", state, waited)
+		}
+	}
+	return errors.Error("VmmControl task timeout after 120s")
 }
 
 func (r *SHuaweiRedfishApi) disableHttpsCertVerification(ctx context.Context) {
